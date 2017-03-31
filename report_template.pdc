@@ -1,0 +1,10 @@
+-- Create table
+create table REPORT_TEMPLATE
+(
+  report_id     NUMBER not null,
+  template_data BLOB,
+  version       NUMBER default 1 not null,
+  filename      VARCHAR2(255),
+  mime_type     VARCHAR2(255),
+  last_updated  DATE default sysdate not null
+);
