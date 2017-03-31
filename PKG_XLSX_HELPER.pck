@@ -74,6 +74,8 @@ create or replace package PKG_XLSX_HELPER is
   function GET_FONTS(cSTYLES_XML in clob) return tbFONTS;
   /* Данные листа */
   function GET_SHEET_DATA(cSHEET_XML in clob, cSHARED_STRINGS_XML in clob) return tbCELLS;
+  /* Формат даты */
+  function GET_DATE_1904(cWORKBOOK_XML in clob) return boolean;
 
   /* Сгенерировать код для AS_XLSX */
   procedure GEN_CODE_FOR_AS_XLSX(cSHEET_XML in clob, cSHARED_STRINGS_XML in clob, cSTYLES_XML in clob);
@@ -87,9 +89,6 @@ create or replace package body PKG_XLSX_HELPER is
   sXMLNS     varchar2(200) := 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
   bDATE_1904 boolean := true;
 
-  /* Форматирование даты */
-  type tbXFDATE is table of boolean index by pls_integer;
-  tabXFDATE tbXFDATE;
   /* Формат ячеек */
   type tNUM_FMT is record(
     NUM_FMT_ID  pls_integer,
@@ -181,6 +180,18 @@ create or replace package body PKG_XLSX_HELPER is
     tMC.CELL2_ROW := iCELL2_ROW;
     return tMC;
   end PARSE_MERGE_CELL_NAME;
+
+  /* Определить формат даты в ячейке */
+  function CELL_IS_DATE_FORMAT(iSTYLE_INDEX in pls_integer) return boolean as
+    bRESULT     boolean := false;
+    iNUM_FMT_ID pls_integer;
+  begin
+    /* TODO */
+    if (iNUM_FMT_ID >= 14 and iNUM_FMT_ID <= 22) then
+      bRESULT := true;
+    end if;
+    return bRESULT;
+  end CELL_IS_DATE_FORMAT;
 
   /* Колонки */
   function GET_COLS(cSHEET_XML in clob) return tbCOLS as
@@ -514,8 +525,7 @@ create or replace package body PKG_XLSX_HELPER is
           end if;
         else
           nVALUE := CONVERT_NUMBER(sCELL_VALUE);
-          /* TODO */
-          if sSTYLE_INDEX is not null and tabXFDATE.exists(to_number(sSTYLE_INDEX)) and tabXFDATE(to_number(sSTYLE_INDEX)) then
+          if sSTYLE_INDEX is not null and CELL_IS_DATE_FORMAT(to_number(sSTYLE_INDEX)) then
             tabCELLS(tabCELLS.last).CELL_TYPE := 'D';
             if bDATE_1904 then
               tabCELLS(tabCELLS.last).DATE_VAL := to_date('01-01-1904', 'DD-MM-YYYY') + to_number(nVALUE);
@@ -545,6 +555,22 @@ create or replace package body PKG_XLSX_HELPER is
     return tabCELLS;
   end GET_SHEET_DATA;
 
+  /* Формат даты */
+  function GET_DATE_1904(cWORKBOOK_XML in clob) return boolean as
+    tDOM_NODE dbms_xmldom.domnode;
+    bRESULT   boolean;
+  begin
+    tDOM_NODE := CLOB2NODE(cWORKBOOK_XML);
+    bRESULT   := lower(dbms_xslprocessor.valueof(tDOM_NODE, '/workbook/workbookPr/@date1904', sXMLNS)) in ('true', '1');
+    bRESULT   := nvl(bRESULT, false);
+  
+    if (bDEBUG) then
+      dbms_output.put_line('DATE_1904: ' || BOOLEAN_TO_CHAR(bRESULT));
+    end if;
+  
+    return bRESULT;
+  end GET_DATE_1904;
+
   /* Сгенерировать код для AS_XLSX */
   procedure GEN_CODE_FOR_AS_XLSX(cSHEET_XML in clob, cSHARED_STRINGS_XML in clob, cSTYLES_XML in clob) as
     tabCOLS        tbCOLS := tbCOLS();
@@ -559,9 +585,9 @@ create or replace package body PKG_XLSX_HELPER is
   begin
     tabCOLS        := GET_COLS(cSHEET_XML);
     tabMERGE_CELLS := GET_MERGE_CELLS(cSHEET_XML);
-    tabCELLS       := GET_SHEET_DATA(cSHEET_XML, cSHARED_STRINGS_XML);
     tabCELL_XFS    := GET_CELL_STYLES(cSTYLES_XML);
     tabBORDERS     := GET_BORDERS(cSTYLES_XML);
+    tabCELLS       := GET_SHEET_DATA(cSHEET_XML, cSHARED_STRINGS_XML);
   
     for i in 1 .. tabCOLS.count loop
       dbms_output.put_line('AS_XLSX.SET_COLUMN_WIDTH(' || tabCOLS(i).INDX || ', ' || tabCOLS(i).WIDTH || ');');
@@ -627,22 +653,22 @@ create or replace package body PKG_XLSX_HELPER is
     tabBORDERS     tbBORDERS;
     tabFONTS       tbFONTS;
     tabNUM_FMTS    tbNUM_FMTS;
-    iNUM           pls_integer;
+    iSTYLE_INDEX   pls_integer;
     tALIGNMENT     AS_XLSX.TP_ALIGNMENT;
-    iBORDER_INDX   pls_integer;
+    iBORDER_INDEX  pls_integer;
     iBORDER_ID     pls_integer;
-    iFONT_INDX     pls_integer;
+    iFONT_INDEX    pls_integer;
     iFONT_ID       pls_integer;
-    iNUM_FMT_INDX  pls_integer;
+    iNUM_FMT_INDEX pls_integer;
     iNUM_FMT_ID    pls_integer;
   begin
     tabCOLS        := GET_COLS(cSHEET_XML);
     tabMERGE_CELLS := GET_MERGE_CELLS(cSHEET_XML);
-    tabCELLS       := GET_SHEET_DATA(cSHEET_XML, cSHARED_STRINGS_XML);
     tabCELL_XFS    := GET_CELL_STYLES(cSTYLES_XML);
     tabBORDERS     := GET_BORDERS(cSTYLES_XML);
     tabFONTS       := GET_FONTS(cSTYLES_XML);
     tabNUM_FMTS    := GET_NUM_FMTS(cSTYLES_XML);
+    tabCELLS       := GET_SHEET_DATA(cSHEET_XML, cSHARED_STRINGS_XML);
   
     AS_XLSX.CLEAR_WORKBOOK;
     AS_XLSX.NEW_SHEET('sheet1');
@@ -652,34 +678,36 @@ create or replace package body PKG_XLSX_HELPER is
     end loop;
   
     for i in 1 .. tabCELLS.count loop
-      iNUM := to_number(tabCELLS(i).STYLE_INDEX);
-      if (iNUM is not null) then
-        if (tabCELL_XFS.exists(iNUM)) then
-          tALIGNMENT := AS_XLSX.GET_ALIGNMENT(P_HORIZONTAL => tabCELL_XFS(iNUM).HORIZONTAL,
-                                              P_VERTICAL   => tabCELL_XFS(iNUM).VERTICAL,
-                                              P_WRAPTEXT   => tabCELL_XFS(iNUM).WRAPTEXT);
+      iSTYLE_INDEX := to_number(tabCELLS(i).STYLE_INDEX);
+      if (iSTYLE_INDEX is not null) then
+        if (tabCELL_XFS.exists(iSTYLE_INDEX)) then
+          tALIGNMENT := AS_XLSX.GET_ALIGNMENT(P_HORIZONTAL => tabCELL_XFS(iSTYLE_INDEX).HORIZONTAL,
+                                              P_VERTICAL   => tabCELL_XFS(iSTYLE_INDEX).VERTICAL,
+                                              P_WRAPTEXT   => tabCELL_XFS(iSTYLE_INDEX).WRAPTEXT);
         
-          iBORDER_INDX := tabCELL_XFS(iNUM).BORDER_ID;
-          if (tabBORDERS.exists(iBORDER_INDX)) then
-            iBORDER_ID := AS_XLSX.GET_BORDER(P_TOP    => tabBORDERS(iBORDER_INDX).TOP,
-                                             P_BOTTOM => tabBORDERS(iBORDER_INDX).BOTTOM,
-                                             P_LEFT   => tabBORDERS(iBORDER_INDX).LEFT,
-                                             P_RIGHT  => tabBORDERS(iBORDER_INDX).RIGHT);
+          iBORDER_INDEX := tabCELL_XFS(iSTYLE_INDEX).BORDER_ID;
+          if (tabBORDERS.exists(iBORDER_INDEX)) then
+            iBORDER_ID := AS_XLSX.GET_BORDER(P_TOP    => tabBORDERS(iBORDER_INDEX).TOP,
+                                             P_BOTTOM => tabBORDERS(iBORDER_INDEX).BOTTOM,
+                                             P_LEFT   => tabBORDERS(iBORDER_INDEX).LEFT,
+                                             P_RIGHT  => tabBORDERS(iBORDER_INDEX).RIGHT);
           end if;
-          iFONT_INDX := tabCELL_XFS(iNUM).FONT_ID;
-          if (tabFONTS.exists(iFONT_INDX)) then
-            iFONT_ID := AS_XLSX.GET_FONT(P_NAME      => tabFONTS(iFONT_INDX).NAME,
-                                         P_FAMILY    => tabFONTS(iFONT_INDX).FAMILY,
-                                         P_FONTSIZE  => tabFONTS(iFONT_INDX).FONTSIZE,
-                                         P_UNDERLINE => tabFONTS(iFONT_INDX).UNDERLINE,
-                                         P_ITALIC    => tabFONTS(iFONT_INDX).ITALIC,
-                                         P_BOLD      => tabFONTS(iFONT_INDX).BOLD,
-                                         P_RGB       => tabFONTS(iFONT_INDX).COLOR);
+          iFONT_INDEX := tabCELL_XFS(iSTYLE_INDEX).FONT_ID;
+          if (tabFONTS.exists(iFONT_INDEX)) then
+            iFONT_ID := AS_XLSX.GET_FONT(P_NAME      => tabFONTS(iFONT_INDEX).NAME,
+                                         P_FAMILY    => tabFONTS(iFONT_INDEX).FAMILY,
+                                         P_FONTSIZE  => tabFONTS(iFONT_INDEX).FONTSIZE,
+                                         P_UNDERLINE => tabFONTS(iFONT_INDEX).UNDERLINE,
+                                         P_ITALIC    => tabFONTS(iFONT_INDEX).ITALIC,
+                                         P_BOLD      => tabFONTS(iFONT_INDEX).BOLD,
+                                         P_RGB       => tabFONTS(iFONT_INDEX).COLOR);
           end if;
-          iNUM_FMT_INDX := tabCELL_XFS(iNUM).NUM_FMT_ID;
-          if (tabNUM_FMTS.exists(iNUM_FMT_INDX)) then
-            null;
-            --iNUM_FMT_ID := AS_XLSX.GET_NUMFMT(tabNUM_FMTS(iNUM_FMT_INDX).FORMAT_CODE);
+          iNUM_FMT_INDEX := tabCELL_XFS(iSTYLE_INDEX).NUM_FMT_ID;
+          if (tabNUM_FMTS.exists(iNUM_FMT_INDEX)) then
+            iNUM_FMT_ID := tabNUM_FMTS(iNUM_FMT_INDEX).NUM_FMT_ID;
+            if (iNUM_FMT_ID >= 164) then
+              iNUM_FMT_ID := AS_XLSX.GET_NUMFMT(tabNUM_FMTS(iNUM_FMT_INDEX).FORMAT_CODE);
+            end if;
           end if;
         end if;
       end if;
@@ -701,6 +729,9 @@ create or replace package body PKG_XLSX_HELPER is
                      P_FONTID    => iFONT_ID,
                      P_NUMFMTID  => iNUM_FMT_ID);
       else
+        if (tabCELLS(i).STRING_VAL is null) then
+          iNUM_FMT_ID := null;
+        end if;
         AS_XLSX.CELL(tabCELLS   (i).COL,
                      tabCELLS   (i).ROW,
                      tabCELLS   (i).STRING_VAL,
@@ -754,11 +785,17 @@ create or replace package body PKG_XLSX_HELPER is
     bXLSX               blob;
     bUNZIP_FILE         blob;
     xFILE               XMLTYPE;
+    cWORKBOOK_XML       clob;
     cSHEET_XML          clob;
     cSHARED_STRINGS_XML clob;
     cSTYLES_XML         clob;
   begin
     bXLSX := GET_TEMPLATE(nREPORT_ID, iVERSION);
+  
+    bUNZIP_FILE := AS_ZIP.GET_FILE(bXLSX, 'xl/workbook.xml');
+    xFILE       := XMLTYPE.CREATEXML(bUNZIP_FILE, nls_charset_id('AL32UTF8'), null);
+    DBMS_LOB.FREETEMPORARY(bUNZIP_FILE);
+    cWORKBOOK_XML := xFILE.GETCLOBVAL();
   
     bUNZIP_FILE := AS_ZIP.GET_FILE(bXLSX, 'xl/worksheets/sheet1.xml');
     xFILE       := XMLTYPE.CREATEXML(bUNZIP_FILE, nls_charset_id('AL32UTF8'), null);
@@ -774,6 +811,8 @@ create or replace package body PKG_XLSX_HELPER is
     xFILE       := XMLTYPE.CREATEXML(bUNZIP_FILE, nls_charset_id('AL32UTF8'), null);
     DBMS_LOB.FREETEMPORARY(bUNZIP_FILE);
     cSTYLES_XML := xFILE.GETCLOBVAL();
+  
+    bDATE_1904 := GET_DATE_1904(cWORKBOOK_XML);
   
     BUILD_AS_XLSX(cSHEET_XML, cSHARED_STRINGS_XML, cSTYLES_XML);
   end CREATE_REPORT_TEMPLATE;
